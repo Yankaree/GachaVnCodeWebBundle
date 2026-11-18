@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<!--
+  cmake/web-shell.html - the HTML page Emscripten wraps the WebAssembly module in.
+
+  Emscripten copies this file to GachaVNcode.html next to GachaVNcode.js and
+  GachaVNcode.wasm. Everything in here that is load-bearing, and why:
+
+    1. <canvas id="canvas"> - SDL2's Emscripten video driver looks the canvas up
+       BY THIS ID. src/video/emscripten/SDL_emscriptenvideo.c hardcodes
+       wdata->canvas_id = "#canvas" and passes it to
+       emscripten_set_canvas_element_size().
+
+    2. Module.canvas = that same element - and this one is easy to miss.
+       Emscripten resolves the string "#canvas" through
+       findEventTarget() -> Module['canvas']
+       (src/library_html5.js), NOT through document.getElementById. So the id
+       alone is not enough: without Module.canvas, SDL_CreateWindow() does not
+       even fail with a nice message - eglCreateContext() calls
+       GL.createContext(Module['canvas'], ...) with undefined, and the page dies
+       with "Cannot read properties of undefined (reading
+       'getContextSafariWebGL2Fixed')" before the game draws anything.
+       Emscripten's own src/shell.html does exactly this.
+
+    3. <script async type="text/javascript" src="GachaVNcode.js"></script> - the generated bootstrap that fetches and instantiates the
+       module. It must stay where Emscripten puts it, after `var Module`.
+
+  Deliberately NOT present, on purpose:
+
+    * No JavaScript of our own beyond the Module object and an error handler.
+      There is no JS in this project; the only real JS is what Emscripten
+      generates. Module.canvas and the two context-loss handlers below are the
+      minimum an Emscripten page needs, not a rewrite.
+    * No SharedArrayBuffer / COOP-COEP requirement: pthreads are off, so this
+      page runs from any plain static file server.
+-->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <title>Gacha VNcode edition</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background: #1b2b2b;
+            color: #dfe6e6;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden;
+        }
+        #page {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100%;
+            box-sizing: border-box;
+            padding: 12px;
+            gap: 10px;
+        }
+        #canvas {
+            display: block;
+            /* The game asks SDL for 854x480; keep that aspect ratio and let the
+               canvas scale to whatever the browser window happens to be. */
+            width: min(100%, calc((100vh - 120px) * 854 / 480));
+            height: auto;
+            max-height: calc(100vh - 120px);
+            background: #223333;
+            border-radius: 4px;
+            /* Crisp scaling of a 2D UI: no smoothing on the upscale. */
+            image-rendering: pixelated;
+            touch-action: none;
+        }
+        #status {
+            font-size: 13px;
+            line-height: 1.5;
+            opacity: 0.85;
+            text-align: center;
+            max-width: 60ch;
+        }
+        #status.hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="page">
+        <canvas id="canvas" class="emscripten" width="854" height="480"
+                oncontextmenu="event.preventDefault()"
+                tabindex="-1" aria-label="Gacha VNcode edition game canvas"></canvas>
+        <div id="status">
+            Loading the WebAssembly module&hellip;<br>
+            <small>If this message stays, open the browser console (F12) - the
+            game's own diagnostics are printed there by SDL_Log.</small>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        // The Module object Emscripten reads at startup. `canvas` is the
+        // important one - see the note at the top of this file. print/printErr
+        // route the game's own platform::Log()/std::cout output to the console
+        // where it can actually be read.
+        var Module = {
+            canvas: (function () {
+                var canvas = document.getElementById('canvas');
+                // If the GPU process dies (driver reset, tab backgrounded too
+                // long), WebGL contexts are lost and cannot be restored without
+                // a reload. Say so instead of leaving a frozen grey rectangle.
+                canvas.addEventListener('webglcontextlost', function (e) {
+                    e.preventDefault();
+                    setStatus('<b>The WebGL context was lost.</b><br>' +
+                              '<small>Reload the page to start the game again.</small>');
+                }, false);
+                return canvas;
+            })(),
+
+            print: function (text) {
+                console.log(text);
+            },
+            printErr: function (text) {
+                console.error(text);
+            },
+
+            setStatus: setStatus,
+
+            onAbort: function (what) {
+                setStatus('<b>The game could not start.</b><br>' +
+                          '<small>' + what + '<br>' +
+                          'Open the browser console (F12) for the full log.</small>');
+            }
+        };
+
+        function setStatus(html) {
+            var el = document.getElementById('status');
+            if (el) {
+                el.innerHTML = html;
+                el.classList.remove('hidden');
+            }
+        }
+
+        // Hide the "loading" line as soon as the module has actually started.
+        // Emscripten calls run() after the .data package is mounted and main()
+        // starts; onAbort() runs if the module refuses to come up at all.
+        Module['onRuntimeInitialized'] = function () {
+            var el = document.getElementById('status');
+            if (el) {
+                el.classList.add('hidden');
+            }
+        };
+
+        // Covers the case where the module never even calls onAbort: a thrown
+        // exception inside SDL_Init / SDL_CreateWindow would otherwise leave
+        // the page on the loading line with nothing to look at.
+        window.addEventListener('error', function (e) {
+            setStatus('<b>Startup error.</b><br><small>' + (e.message || e) + '</small>');
+        });
+    </script>
+    <script async type="text/javascript" src="GachaVNcode.js"></script>
+</body>
+</html>
