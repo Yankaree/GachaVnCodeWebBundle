@@ -14,10 +14,10 @@ contains the preloaded assets.
 
 ## Build provenance
 
-Source commit: 33eb1f23742d79b0b687d6f2a133567bed3800ff
+Source commit: f0c0094d4ed8b05810485eccb76d4ed0563ba13f
 Source repository: Yankaree/Gacha-vncode
 Source branch: VNcode
 Build tool: Emscripten 3.1.74
-Generated: 2026-11-19T08:32:56Z
+Generated: 2026-11-20T14:06:21Z
 
 pthreads are intentionally disabled (no SharedArrayBuffer).
